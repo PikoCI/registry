@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PikoCI Registry</title>
+
+    <!-- Bootstrap 5.3 CSS -->
+    <link href="/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Bootstrap Icons -->
+    <link href="/css/bootstrap-icons.min.css" rel="stylesheet">
+
+    <!-- App CSS -->
+    <link rel="stylesheet" href="/css/registry.css">
+
+    <!-- Theme init to prevent FOUC -->
+    <script>
+      (function() {
+        var theme = localStorage.getItem('pikoci-registry-theme') || 'light';
+        document.documentElement.setAttribute('data-theme', theme);
+      })();
+    </script>
+</head>
+<body>
+    <div id="app"></div>
+
+    <!-- ============================================================ -->
+    <!-- Underscore.js Templates                                       -->
+    <!-- ============================================================ -->
+
+    <!-- Header / Navbar -->
+    <script type="text/template" id="tmpl-header">
+      <nav class="navbar navbar-expand-lg pkreg-navbar">
+        <div class="container">
+          <a class="navbar-brand" href="/">
+            <img src="/images/logo.svg" alt="PikoCI Registry">
+            PikoCI Registry
+          </a>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" style="border-color: rgba(255,255,255,0.3);">
+            <span class="navbar-toggler-icon" style="filter: invert(1);"></span>
+          </button>
+          <div class="collapse navbar-collapse" id="navbarNav">
+            <div class="navbar-search mx-lg-4">
+              <form class="navbar-search-form">
+                <i class="bi bi-search search-icon"></i>
+                <input type="text" class="form-control navbar-search-input" placeholder="Search plugins..." autocomplete="off">
+              </form>
+            </div>
+            <ul class="navbar-nav ms-auto align-items-center">
+              <li class="nav-item">
+                <a class="nav-link" href="/tags"><i class="bi bi-tags me-1"></i>Tags</a>
+              </li>
+              <% if (isLoggedIn && user) { %>
+                <li class="nav-item">
+                  <a class="nav-link" href="/me/types"><i class="bi bi-box me-1"></i>My Plugins</a>
+                </li>
+                <li class="nav-item">
+                  <a class="nav-link" href="/me/tokens"><i class="bi bi-key me-1"></i>Tokens</a>
+                </li>
+                <li class="nav-item dropdown">
+                  <a class="nav-link dropdown-toggle d-flex align-items-center gap-2" href="#" role="button" data-bs-toggle="dropdown">
+                    <% if (user.AvatarURL) { %>
+                      <img src="<%= user.AvatarURL %>" alt="" class="user-avatar">
+                    <% } else { %>
+                      <i class="bi bi-person-circle"></i>
+                    <% } %>
+                    <span><%= user.Username || 'Account' %></span>
+                  </a>
+                  <ul class="dropdown-menu dropdown-menu-end">
+                    <li><a class="dropdown-item" href="/me/types"><i class="bi bi-box me-2"></i>My Plugins</a></li>
+                    <li><a class="dropdown-item" href="/me/tokens"><i class="bi bi-key me-2"></i>Tokens</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item logout-btn" href="#"><i class="bi bi-box-arrow-right me-2"></i>Logout</a></li>
+                  </ul>
+                </li>
+              <% } else { %>
+                <li class="nav-item">
+                  <a class="nav-link" href="/login"><i class="bi bi-github me-1"></i>Sign In</a>
+                </li>
+              <% } %>
+              <li class="nav-item ms-2">
+                <button class="theme-toggle" title="Toggle theme">
+                  <i class="bi <%= theme === 'dark' ? 'bi-sun' : 'bi-moon' %>"></i>
+                </button>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </nav>
+    </script>
+
+    <!-- Search / Home page -->
+    <script type="text/template" id="tmpl-search">
+      <div class="search-hero">
+        <h1><i class="bi bi-box-seam me-2"></i>Plugin Registry</h1>
+        <p>Discover and share plugins for your infrastructure</p>
+      </div>
+
+      <% if (popularTags && popularTags.length > 0) { %>
+        <div class="popular-tags mb-4 text-center">
+          <span class="small fw-semibold me-2" style="color: var(--text-muted);"><i class="bi bi-tags me-1"></i>Popular:</span>
+          <% _.each(popularTags, function(t) { %>
+            <a href="/tags/<%= encodeURIComponent(t.Tag) %>" class="tag-pill tag-pill-sm">
+              <%= t.Tag %>
+              <span class="tag-count"><%= t.Count %></span>
+            </a>
+          <% }); %>
+        </div>
+      <% } %>
+
+      <div class="kind-tabs">
+        <button class="kind-tab <%= kind === '' ? 'active' : '' %>" data-kind="">All</button>
+        <button class="kind-tab <%= kind === 'resource_type' ? 'active' : '' %>" data-kind="resource_type">
+          <i class="bi bi-box"></i> Resource
+        </button>
+        <button class="kind-tab <%= kind === 'runner_type' ? 'active' : '' %>" data-kind="runner_type">
+          <i class="bi bi-play-circle"></i> Runner
+        </button>
+        <button class="kind-tab <%= kind === 'service_type' ? 'active' : '' %>" data-kind="service_type">
+          <i class="bi bi-gear"></i> Service
+        </button>
+        <button class="kind-tab <%= kind === 'secret_type' ? 'active' : '' %>" data-kind="secret_type">
+          <i class="bi bi-shield-lock"></i> Secret
+        </button>
+        <button class="kind-tab <%= kind === 'notification_type' ? 'active' : '' %>" data-kind="notification_type">
+          <i class="bi bi-bell"></i> Notification
+        </button>
+      </div>
+
+      <div class="search-results-count"></div>
+      <div class="search-results"></div>
+      <div class="search-pagination mt-3"></div>
+    </script>
+
+    <!-- Search result card (reusable) -->
+    <script type="text/template" id="tmpl-search-result-card">
+      <div class="pkreg-card mb-3">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              <h5 class="card-title">
+                <a href="/plugins/<%= t.NamespaceName || t.NamespaceID || 'unknown' %>/<%= t.Name %>"><%= t.Name %></a>
+              </h5>
+              <div class="mb-2">
+                <a href="/plugins/<%= t.NamespaceName || t.NamespaceID || 'unknown' %>" class="text-muted small"><%= t.NamespaceName || t.NamespaceID || 'unknown' %></a>
+              </div>
+              <p class="card-text"><%= t.Description || 'No description available' %></p>
+            </div>
+            <div class="text-end">
+              <span class="kind-badge kind-badge-<%= t.Kind %>">
+                <i class="bi <%= kindIcon(t.Kind) %>"></i>
+                <%= formatKind(t.Kind) %>
+              </span>
+            </div>
+          </div>
+          <div class="d-flex gap-3 mt-2">
+            <% if (t.License) { %>
+              <span class="small text-muted"><i class="bi bi-file-text me-1"></i><%= t.License %></span>
+            <% } %>
+            <% if (t.CreatedAt) { %>
+              <span class="small text-muted"><i class="bi bi-calendar me-1"></i><%= formatDate(t.CreatedAt) %></span>
+            <% } %>
+          </div>
+        </div>
+      </div>
+    </script>
+
+    <!-- Type Detail page -->
+    <script type="text/template" id="tmpl-type-detail">
+      <div class="type-header">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+          <div>
+            <div class="namespace-link">
+              <a href="/plugins/<%= namespace %>"><i class="bi bi-person me-1"></i><%= namespace %></a>
+            </div>
+            <h1><%= type.Name %></h1>
+            <p class="mb-0" style="color: var(--text-secondary);"><%= type.Description || 'No description' %></p>
+          </div>
+          <span class="kind-badge kind-badge-<%= type.Kind %>">
+            <i class="bi <%= kindIcon(type.Kind) %>"></i>
+            <%= formatKind(type.Kind) %>
+          </span>
+        </div>
+        <div class="type-meta">
+          <% if (type.License) { %>
+            <div class="type-meta-item"><i class="bi bi-file-text"></i> <%= type.License %></div>
+          <% } %>
+          <% if (type.Repository) { %>
+            <div class="type-meta-item"><i class="bi bi-github"></i> <a href="<%= type.Repository %>" target="_blank" rel="noopener">Repository</a></div>
+          <% } %>
+          <% if (type.Homepage) { %>
+            <div class="type-meta-item"><i class="bi bi-globe"></i> <a href="<%= type.Homepage %>" target="_blank" rel="noopener">Homepage</a></div>
+          <% } %>
+          <div class="type-meta-item"><i class="bi bi-calendar"></i> <%= formatDate(type.CreatedAt) %></div>
+        </div>
+        <div class="tag-cloud mt-3">
+          <% _.each(tags, function(tag) { %>
+            <% if (isOwner) { %>
+              <span class="tag-pill tag-pill-editable">
+                <a href="/tags/<%= encodeURIComponent(tag) %>"><%= tag %></a>
+                <button class="btn-remove-tag" data-tag="<%= tag %>" title="Remove tag"><i class="bi bi-x-lg"></i></button>
+              </span>
+            <% } else { %>
+              <a href="/tags/<%= encodeURIComponent(tag) %>" class="tag-pill"><%= tag %></a>
+            <% } %>
+          <% }); %>
+          <% if (isOwner) { %>
+            <span class="tag-add-inline">
+              <input type="text" class="tag-add-input" placeholder="+ add tag" size="10">
+            </span>
+          <% } %>
+        </div>
+      </div>
+
+      <!-- Version selector -->
+      <% if (versions.length > 0) { %>
+        <div class="version-selector d-flex align-items-center gap-3 mb-3">
+          <label class="fw-semibold" style="color: var(--text-secondary);"><i class="bi bi-tag me-1"></i>Version</label>
+          <select class="form-select version-select" style="width: auto; min-width: 160px;">
+            <% _.each(versions, function(v) { %>
+              <option value="<%= v.Version %>" <%= v.Version === selectedVersion.Version ? 'selected' : '' %>>
+                <%= v.Version %><%= v.Yanked ? ' (yanked)' : '' %><%= v.Deprecated ? ' (deprecated)' : '' %>
+              </option>
+            <% }); %>
+          </select>
+          <span class="small text-muted">
+            <i class="bi bi-calendar me-1"></i><%= formatDate(selectedVersion.CreatedAt) %>
+            <span class="ms-2"><i class="bi bi-download me-1"></i><%= selectedVersion.Downloads %></span>
+          </span>
+          <span class="small text-muted ms-auto"><%= versions.length %> version<%= versions.length !== 1 ? 's' : '' %></span>
+        </div>
+        <% if (isOwner) { %>
+          <div class="version-actions d-flex gap-2 mb-3">
+            <% if (!selectedVersion.Yanked) { %>
+              <button class="btn btn-sm btn-outline-warning btn-yank" title="Yank this version">
+                <i class="bi bi-eye-slash me-1"></i>Yank
+              </button>
+            <% } else { %>
+              <span class="badge bg-warning text-dark"><i class="bi bi-eye-slash me-1"></i>Yanked</span>
+            <% } %>
+            <% if (!selectedVersion.Deprecated) { %>
+              <button class="btn btn-sm btn-outline-secondary btn-deprecate" title="Deprecate this version">
+                <i class="bi bi-exclamation-triangle me-1"></i>Deprecate
+              </button>
+            <% } else { %>
+              <span class="badge bg-secondary">
+                <i class="bi bi-exclamation-triangle me-1"></i>Deprecated<%= selectedVersion.DeprecatedMessage ? ': ' + selectedVersion.DeprecatedMessage : '' %>
+              </span>
+            <% } %>
+            <button class="btn btn-sm btn-outline-danger btn-delete-version" title="Delete this version">
+              <i class="bi bi-trash me-1"></i>Delete Version
+            </button>
+            <div class="ms-auto">
+              <button class="btn btn-sm btn-danger btn-delete-type" title="Delete plugin and all versions">
+                <i class="bi bi-trash me-1"></i>Delete Plugin
+              </button>
+            </div>
+          </div>
+        <% } %>
+      <% } %>
+
+      <!-- Tabs -->
+      <ul class="nav pkreg-tabs mb-3">
+        <li class="nav-item">
+          <a class="nav-link detail-tab <%= activeTab === 'readme' ? 'active' : '' %>" href="#" data-tab="readme">
+            <i class="bi bi-book me-1"></i>Readme
+          </a>
+        </li>
+        <% if (params.length > 0) { %>
+        <li class="nav-item">
+          <a class="nav-link detail-tab <%= activeTab === 'params' ? 'active' : '' %>" href="#" data-tab="params">
+            <i class="bi bi-sliders me-1"></i>Params (<%= params.length %>)
+          </a>
+        </li>
+        <% } %>
+        <li class="nav-item">
+          <a class="nav-link detail-tab <%= activeTab === 'content' ? 'active' : '' %>" href="#" data-tab="content">
+            <i class="bi bi-code-slash me-1"></i>Content
+          </a>
+        </li>
+      </ul>
+
+      <!-- Tab content -->
+      <div class="tab-content">
+        <% if (activeTab === 'params') { %>
+          <div class="pkreg-card">
+            <div class="card-body p-0">
+              <div class="pkreg-table">
+                <table class="table table-hover mb-0">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Required</th>
+                      <th>Description</th>
+                      <th>Default</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <% _.each(params, function(p) { %>
+                      <tr>
+                        <td><code><%= p.name || p.Name %></code></td>
+                        <td><%= (p.required || p.Required) ? '<span class="badge bg-warning text-dark">required</span>' : '<span class="badge bg-secondary">optional</span>' %></td>
+                        <td class="text-muted"><%= p.description || p.Description || '-' %></td>
+                        <td><%= (p.default || p.Default) ? '<code>' + (p.default || p.Default) + '</code>' : '-' %></td>
+                      </tr>
+                    <% }); %>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        <% } else if (activeTab === 'readme') { %>
+          <% if (selectedVersion && selectedVersion.Readme) { %>
+            <div class="readme-content readme-rendered"></div>
+          <% } else { %>
+            <div class="empty-state"><i class="bi bi-book"></i><p>No readme available</p></div>
+          <% } %>
+        <% } else if (activeTab === 'content') { %>
+          <% if (selectedVersion && selectedVersion.Content) { %>
+            <div class="pkreg-card">
+              <div class="card-body p-0">
+                <pre class="hcl-content"><code><%= _.escape(selectedVersion.Content) %></code></pre>
+              </div>
+            </div>
+          <% } else { %>
+            <div class="empty-state"><i class="bi bi-code-slash"></i><p>No content available</p></div>
+          <% } %>
+        <% } %>
+      </div>
+    </script>
+
+    <!-- Namespace page -->
+    <script type="text/template" id="tmpl-namespace">
+      <div class="namespace-header">
+        <h1><i class="bi bi-person me-2"></i><%= namespace %></h1>
+        <p class="text-muted"><%= types.length %> plugin<%= types.length !== 1 ? 's' : '' %></p>
+      </div>
+      <div class="type-cards-grid"></div>
+      <% if (types.length === 0) { %>
+        <div class="empty-state"><i class="bi bi-inbox"></i><p>No plugins in this namespace</p></div>
+      <% } %>
+    </script>
+
+    <!-- Tags page -->
+    <script type="text/template" id="tmpl-tags">
+      <h1 class="mb-4"><i class="bi bi-tags me-2"></i>Tags</h1>
+      <% if (tags.length === 0) { %>
+        <div class="empty-state"><i class="bi bi-tags"></i><p>No tags yet</p></div>
+      <% } else { %>
+        <div class="tag-cloud">
+          <% _.each(tags, function(t) { %>
+            <a href="/tags/<%= encodeURIComponent(t.Tag) %>" class="tag-pill">
+              <%= t.Tag %>
+              <span class="tag-count"><%= t.Count %></span>
+            </a>
+          <% }); %>
+        </div>
+      <% } %>
+    </script>
+
+    <!-- Tag detail page -->
+    <script type="text/template" id="tmpl-tag-detail">
+      <div class="mb-4">
+        <a href="/tags" class="text-muted"><i class="bi bi-arrow-left me-1"></i>All tags</a>
+      </div>
+      <h1 class="mb-3"><i class="bi bi-tag me-2"></i><%= tagName %></h1>
+      <p class="text-muted mb-4"><%= types.length %> plugin<%= types.length !== 1 ? 's' : '' %></p>
+      <div class="type-cards-grid"></div>
+      <% if (types.length === 0) { %>
+        <div class="empty-state"><i class="bi bi-inbox"></i><p>No plugins with this tag</p></div>
+      <% } %>
+    </script>
+
+    <!-- Login page -->
+    <script type="text/template" id="tmpl-login">
+      <div class="auth-container">
+        <h2><i class="bi bi-box-seam me-2"></i>Sign in to PikoCI Registry</h2>
+        <p>Sign in with your GitHub account to publish and manage plugins.</p>
+        <button class="btn-github">
+          <i class="bi bi-github"></i>
+          Sign in with GitHub
+        </button>
+      </div>
+    </script>
+
+    <!-- My Types page -->
+    <script type="text/template" id="tmpl-my-types">
+      <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1><i class="bi bi-box me-2"></i>My Plugins</h1>
+        <% if (user) { %>
+          <div class="d-flex align-items-center gap-2">
+            <% if (user.AvatarURL) { %>
+              <img src="<%= user.AvatarURL %>" alt="" class="user-avatar" style="width:36px;height:36px;">
+            <% } %>
+            <span class="fw-semibold"><%= user.Username %></span>
+          </div>
+        <% } %>
+      </div>
+      <% if (types.length === 0) { %>
+        <div class="empty-state">
+          <i class="bi bi-inbox"></i>
+          <p>You haven't published any plugins yet.</p>
+          <p class="small text-muted">Use the CLI to publish your first plugin.</p>
+        </div>
+      <% } else { %>
+        <div class="pkreg-table">
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Kind</th>
+                <th>Description</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% _.each(types, function(t) { %>
+                <tr>
+                  <td>
+                    <a href="/plugins/<%= t.NamespaceName || t.NamespaceID %>/<%= t.Name %>" class="fw-semibold"><%= t.Name %></a>
+                  </td>
+                  <td>
+                    <span class="kind-badge kind-badge-<%= t.Kind %>">
+                      <i class="bi <%= kindIcon(t.Kind) %>"></i>
+                      <%= formatKind(t.Kind) %>
+                    </span>
+                  </td>
+                  <td class="text-muted"><%= t.Description || '-' %></td>
+                  <td class="text-muted"><%= formatDate(t.CreatedAt) %></td>
+                </tr>
+              <% }); %>
+            </tbody>
+          </table>
+        </div>
+      <% } %>
+    </script>
+
+    <!-- Tokens page -->
+    <script type="text/template" id="tmpl-tokens">
+      <h1 class="mb-4"><i class="bi bi-key me-2"></i>API Tokens</h1>
+
+      <% if (newToken) { %>
+        <div class="alert alert-success">
+          <strong>Token created!</strong> Copy it now - you won't see it again.
+          <div class="token-display mt-2"><%= newToken %></div>
+        </div>
+      <% } %>
+
+      <div class="pkreg-card mb-4">
+        <div class="card-body">
+          <h5 class="mb-3">Create New Token</h5>
+          <form class="create-token-form">
+            <div class="row g-3 align-items-end">
+              <div class="col-md-4">
+                <label class="form-label">Token Name</label>
+                <input type="text" class="form-control token-name-input" placeholder="e.g., ci-deploy" required>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Namespace (optional)</label>
+                <input type="text" class="form-control token-namespace-input" placeholder="e.g., myorg">
+              </div>
+              <div class="col-md-4">
+                <button type="submit" class="btn btn-primary w-100">
+                  <i class="bi bi-plus-circle me-1"></i>Create Token
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <% if (tokens.length === 0) { %>
+        <div class="empty-state">
+          <i class="bi bi-key"></i>
+          <p>No tokens yet. Create one to publish plugins via the CLI.</p>
+        </div>
+      <% } else { %>
+        <div class="pkreg-table">
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Prefix</th>
+                <th>Created</th>
+                <th>Expires</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <% _.each(tokens, function(t) { %>
+                <tr>
+                  <td class="fw-semibold"><%= t.Name %></td>
+                  <td><code><%= t.Prefix %>...</code></td>
+                  <td class="text-muted"><%= formatDate(t.CreatedAt) %></td>
+                  <td class="text-muted"><%= t.ExpiresAt ? formatDate(t.ExpiresAt) : 'Never' %></td>
+                  <td class="text-end">
+                    <button class="btn btn-sm btn-outline-danger revoke-token-btn" data-token-id="<%= t.ID %>">
+                      <i class="bi bi-trash"></i> Revoke
+                    </button>
+                  </td>
+                </tr>
+              <% }); %>
+            </tbody>
+          </table>
+        </div>
+      <% } %>
+    </script>
+
+    <!-- ============================================================ -->
+    <!-- Vendor JS (embedded)                                          -->
+    <!-- ============================================================ -->
+    <script src="/js/jquery.min.js"></script>
+    <script src="/js/underscore.min.js"></script>
+    <script src="/js/backbone.min.js"></script>
+    <script src="/js/bootstrap.bundle.min.js"></script>
+    <script src="/js/marked.min.js"></script>
+    <script src="/js/purify.min.js"></script>
+
+    <!-- ============================================================ -->
+    <!-- App JS (order matters)                                        -->
+    <!-- ============================================================ -->
+    <script src="/js/app/namespace.js"></script>
+    <script src="/js/app/models.js"></script>
+    <script src="/js/app/collections.js"></script>
+    <script src="/js/app/views/layout.js"></script>
+    <script src="/js/app/views/search.js"></script>
+    <script src="/js/app/views/type-detail.js"></script>
+    <script src="/js/app/views/namespace.js"></script>
+    <script src="/js/app/views/tags.js"></script>
+    <script src="/js/app/views/auth.js"></script>
+    <script src="/js/app/router.js"></script>
+    <script src="/js/app/init.js"></script>
+</body>
+</html>

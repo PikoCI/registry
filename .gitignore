@@ -1,0 +1,8 @@
+*.db
+/builds
+*.pem
+.env
+coverage.out
+coverage-backends.out
+vendor/
+test-git/
